@@ -1,0 +1,111 @@
+x=runif(100,0,2)
+y=x^2+x+1+rnorm(100)
+w=x^2
+plot(x,y)
+indices=sample(1:100,5,replace=F)
+
+LM=lm(y[indices]~x[indices])
+QM=lm(y[indices]~x[indices]+w[indices])
+#CM=
+
+le=numeric(10000)
+qe=numeric(10000)
+ce=numeric(10000)
+for (i in 1:10000) {j=sample(1:100,1); le[i]=x[j]^2+x[j]+1+rnorm(1)-LM$coefficients[1]-LM$coefficients[2]*x[j]}
+for (i in 1:10000) {j=sample(1:100,1); qe[i]=x[j]^2+x[j]+1+rnorm(1)-QM$coefficients[1]-QM$coefficients[2]*x[j]-QM$coefficients[3]*x[j]^2}
+#for (i in 1:10000) {j=sample(1:100,1); ce[i]=x[j]^2+x[j]+1+rnorm(1)-CE$coefficients[1]-CE$coefficients[2]*x[j]-CE$coefficients[3]*x[j]^2}
+mean(le^2)
+mean(qe^2)
+
+
+set.seed(42)
+
+#Simulation parameters
+n_sim   <- 1000       # number of simulated training sets
+n_pool  <- 200        # pool of candidate x values to sample from
+n_train <- 20
+# size of each training set (small to emphasise variance)
+sigma   <- 1          # noise sd
+x_pool  <- runif(n_pool, 0, 2)
+x_test  <- seq(0, 2, length.out = 100)
+f_true  <- function(x) x^2 + x + 1
+
+# matrices to store predictions (rows = sim, cols = test points)
+pred_biased  <- matrix(0, nrow = n_sim, ncol = length(x_test))  # linear: bias
+pred_var     <- matrix(0, nrow = n_sim, ncol = length(x_test))  # poly: variance
+
+for (s in 1:n_sim) {
+  # sample small training set
+  idx <- sample(seq_len(n_pool), n_train, replace = FALSE)
+  x_train <- x_pool[idx]
+  y_train <- f_true(x_train) + rnorm(n_train, 0, sigma)
+  
+  # Biased model
+  lm_fit <- lm(y_train ~ x_train)
+  newdata_lm <- data.frame(x_train = x_test)
+  pred_biased[s, ] <- predict(lm_fit, newdata = newdata_lm)
+  
+  # High-variance model: polynomial (degree 8) 
+  # this chanegs variance
+  deg <- 2
+  # use poly but predict needs same names; create a data frame with x_train for fitting and x_test for predict
+  df_train <- data.frame(x = x_train, y = y_train)
+  poly_fit <- lm(y ~ poly(x, deg, raw = TRUE), data = df_train)
+  df_test <- data.frame(x = x_test)
+  pred_var[s, ] <- predict(poly_fit, newdata = df_test)
+}
+
+# Compute true values at test points (without noise) for bias calc
+y_true <- f_true(x_test)
+
+# For each test point compute:
+# mean prediction, bias^2 = (mean(pred) - true)^2, variance = var(pred), mse = mean((pred - noisy_y)^2)
+mean_pred_biased <- colMeans(pred_biased)
+mean_pred_var    <- colMeans(pred_var)
+
+bias2_biased <- (mean_pred_biased - y_true)^2
+bias2_var    <- (mean_pred_var - y_true)^2
+
+var_biased <- apply(pred_biased, 2, var)
+var_var    <- apply(pred_var, 2, var)
+# Comparison plot: average variance across x
+avg_var <- c(mean(var_biased), mean(var_var))
+names(avg_var) <- c("Linear (Biased)", "Polynomial (High-Var)")
+
+barplot(
+  avg_var,
+  col = c("gray40", "red"),
+  ylab = "Average Prediction Variance",
+  main = "Model Variance Comparison"
+)
+
+
+# MSE estimate at test points
+noisy_truths <- matrix(rep(y_true, each = n_sim), nrow = n_sim, byrow = FALSE) + matrix(rnorm(n_sim * length(x_test), 0, sigma), nrow = n_sim)
+mse_biased <- colMeans((pred_biased - noisy_truths)^2)
+mse_var    <- colMeans((pred_var - noisy_truths)^2)
+
+# Average across test points to summarise
+summary_table <- data.frame(
+  Model = c("Biased (Linear)", paste0("High-Var (Poly deg=", deg, ")")),
+  Mean_Bias2 = c(mean(bias2_biased), mean(bias2_var)),
+  Mean_Var   = c(mean(var_biased), mean(var_var)),
+  Mean_MSE   = c(mean(mse_biased), mean(mse_var))
+)
+print(summary_table)
+
+# Plotting Bias^2, Variance and MSE across the test grid for visual comparison
+par(mfrow = c(3,1), mar = c(4,4,2,1))
+plot(x_test, bias2_biased, type = "l", lty = 1, main = "Bias^2 across x (Biased linear in black, High-var in red)", ylab = "Bias^2", xlab = "x")
+lines(x_test, bias2_var, col = "red", lty = 2)
+
+
+plot(x_test, var_biased, type = "l", main = "Variance across x", ylab = "Variance", xlab = "x")
+lines(x_test, var_var, col = "red", lty = 2)
+
+
+plot(x_test, mse_biased, type = "l", main = "MSE across x", ylab = "MSE", xlab = "x")
+lines(x_test, mse_var, col = "red", lty = 2)
+
+# high test size = low variance in predition
+# low test size = high variance in estimate
